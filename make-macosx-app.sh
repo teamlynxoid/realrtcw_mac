@@ -191,6 +191,14 @@ for ARCH in $SEARCH_ARCHS; do
 	if [ ${CURRENT_ARCH} == "arm64" ]; then FILE_ARCH="arm64"; fi
 
 	BUILT_PRODUCTS_DIR="${OBJROOT}/${TARGET_NAME}-darwin-${CURRENT_ARCH}"
+	# Prefer flavor-suffixed directories (nosteam/steam) added by Makefile when they contain binaries
+	for FLAVOR in nosteam steam; do
+		FLAVOR_DIR="${OBJROOT}/${TARGET_NAME}-darwin-${CURRENT_ARCH}-${FLAVOR}"
+		if [ -e "${FLAVOR_DIR}/${EXECUTABLE_NAME}.${CURRENT_ARCH}" ]; then
+			BUILT_PRODUCTS_DIR="${FLAVOR_DIR}"
+			break
+		fi
+	done
 	IORTCW_CLIENT="${EXECUTABLE_NAME}.${CURRENT_ARCH}"
 	IORTCW_RENDERER_GL1="${RENDERER_OPENGL}_${FILE_ARCH}.dylib"
 	IORTCW_RENDERER_GL2="${RENDERER_OPENGL2}_${FILE_ARCH}.dylib"
@@ -277,7 +285,40 @@ if [ ! -d "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}" ]; then
 fi
 
 # copy and generate some application bundle resources
-cp code/libs/macosx/*.dylib "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}"
+# Copy libopenal (still bundled in repo)
+cp code/libs/macosx/libopenal.dylib "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}/"
+
+# Copy SDL3 from Homebrew
+SDL3_PREFIX="$(brew --prefix sdl3 2>/dev/null)"
+SDL3_LIB="${SDL3_PREFIX}/lib/libSDL3.dylib"
+if [ ! -f "${SDL3_LIB}" ]; then
+	SDL3_LIB="$(pkg-config --variable=libdir sdl3 2>/dev/null)/libSDL3.dylib"
+fi
+if [ ! -f "${SDL3_LIB}" ]; then
+	echo "**** ERROR: libSDL3.dylib not found. Run: brew install sdl3"
+	exit 1
+fi
+cp -f "${SDL3_LIB}" "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}/"
+chmod +w "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}/$(basename "${SDL3_LIB}")"
+
+# Copy FFmpeg dylibs from Homebrew (required -- cl_cin.c hard-links them)
+FFMPEG_LIBDIR="$(pkg-config --variable=libdir libavcodec 2>/dev/null)"
+if [ -z "${FFMPEG_LIBDIR}" ]; then
+	FFMPEG_LIBDIR="$(brew --prefix ffmpeg 2>/dev/null)/lib"
+fi
+for FFLIB in libavcodec libavformat libavutil libswscale libswresample; do
+	FFLIB_PATH="${FFMPEG_LIBDIR}/${FFLIB}.dylib"
+	if [ ! -f "${FFLIB_PATH}" ]; then
+		FFLIB_PATH="$(ls "${FFMPEG_LIBDIR}/${FFLIB}".*.dylib 2>/dev/null | sort -V | tail -1)"
+	fi
+	if [ -f "${FFLIB_PATH}" ]; then
+		cp -f "${FFLIB_PATH}" "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}/"
+		chmod +w "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}/$(basename "${FFLIB_PATH}")"
+	else
+		echo "**** ERROR: ${FFLIB}.dylib not found in ${FFMPEG_LIBDIR}. Run: brew install ffmpeg"
+		exit 1
+	fi
+done
 cp ${ICNSDIR}/${ICNS} "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/$ICNS" || exit 1;
 echo -n ${PKGINFO} > "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/PkgInfo" || exit 1;
 
@@ -401,4 +442,64 @@ action "${BUNDLEBINDIR}/${BASEDIR}/${UI_NAME}"			"${IORTCW_UI_ARCHS}"
 symlinkArch "${CGAME}"	"${CGAME}."	""	"${BUNDLEBINDIR}/${BASEDIR}"
 symlinkArch "${GAME}"	"${GAME}."	""	"${BUNDLEBINDIR}/${BASEDIR}"
 symlinkArch "${UI}"		"${UI}."		""	"${BUNDLEBINDIR}/${BASEDIR}"
+
+# Fix embedded dylib paths so bundle is self-contained
+fix_dylib_ref() {
+	local BINARY="$1"
+	local DYLIB_DEST="$2"
+	local BASENAME LIB_STEM OLD_REF
+	BASENAME=$(basename "${DYLIB_DEST}")
+	LIB_STEM="${BASENAME%.dylib}"  # e.g. libSDL3 from libSDL3.dylib
+	# Update the dylib's own identity to the bundle-relative path
+	install_name_tool -id "@executable_path/${BASENAME}" "${DYLIB_DEST}" 2>/dev/null || true
+	# Find any non-@executable_path reference to this library in the binary
+	# (handles versioned names like libSDL3.0.dylib matching libSDL3.dylib)
+	OLD_REF=$(otool -L "${BINARY}" 2>/dev/null | awk '{print $1}' | grep "${LIB_STEM}" | grep -v "@executable_path" | head -1)
+	if [ -n "${OLD_REF}" ]; then
+		install_name_tool -change "${OLD_REF}" "@executable_path/${BASENAME}" "${BINARY}" 2>/dev/null || true
+	fi
+}
+
+BUNDLE_BIN="${BUNDLEBINDIR}/${EXECUTABLE_NAME}"
+BUNDLE_RENDERER="${BUNDLEBINDIR}/${RENDERER_OPENGL1_NAME}"
+
+for DYLIB in "${BUNDLEBINDIR}"/libSDL3*.dylib \
+             "${BUNDLEBINDIR}"/libavcodec*.dylib \
+             "${BUNDLEBINDIR}"/libavformat*.dylib \
+             "${BUNDLEBINDIR}"/libavutil*.dylib \
+             "${BUNDLEBINDIR}"/libswscale*.dylib \
+             "${BUNDLEBINDIR}"/libswresample*.dylib; do
+	[ -f "${DYLIB}" ] || continue
+	fix_dylib_ref "${BUNDLE_BIN}"      "${DYLIB}"
+	fix_dylib_ref "${BUNDLE_RENDERER}" "${DYLIB}"
+done
+
+# Re-sign all dylibs and binaries with ad-hoc signature after install_name_tool modifications
+echo "Re-signing bundle..."
+for DYLIB in "${BUNDLEBINDIR}"/*.dylib; do
+	[ -f "${DYLIB}" ] || continue
+	codesign --force --sign - "${DYLIB}" 2>/dev/null || true
+done
+codesign --force --sign - "${BUNDLE_BIN}"      2>/dev/null || true
+codesign --force --sign - "${BUNDLE_RENDERER}" 2>/dev/null || true
+
+# Bundle game content pk3 files if GAME_DATA_PATH is set
+if [ -n "${GAME_DATA_PATH}" ]; then
+	GAME_DATA_MAIN="${GAME_DATA_PATH}/main"
+	if [ ! -d "${GAME_DATA_MAIN}" ]; then
+		echo "**** ERROR: GAME_DATA_PATH set but ${GAME_DATA_MAIN} not found"
+		exit 1
+	fi
+	echo "Bundling game content from ${GAME_DATA_MAIN}"
+	for PK3 in "${GAME_DATA_MAIN}"/*.pk3; do
+		[ -f "${PK3}" ] || continue
+		cp -f "${PK3}" "${BUNDLEBINDIR}/${BASEDIR}/"
+		echo "  + $(basename "${PK3}")"
+	done
+	for CFG in "${GAME_DATA_MAIN}"/*.cfg; do
+		[ -f "${CFG}" ] || continue
+		cp -f "${CFG}" "${BUNDLEBINDIR}/${BASEDIR}/"
+		echo "  + $(basename "${CFG}")"
+	done
+fi
 

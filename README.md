@@ -1,6 +1,8 @@
-# RealRTCW
+# RealRTCW — macOS Port
 
 **RealRTCW** is a community-driven single-player overhaul for **Return to Castle Wolfenstein**, built on top of the original **iortcw** and **rtcw-sp** source code.
+
+This repository is the **macOS port** (Apple Silicon / arm64) of RealRTCW, maintained at https://github.com/teamlynxoid/realrtcw_mac.
 
 The project focuses on modernizing the engine, expanding gameplay systems, and improving overall stability and quality of life—while staying true to the original RTCW experience.
 
@@ -11,6 +13,7 @@ The project focuses on modernizing the engine, expanding gameplay systems, and i
 ### Engine & Platform
 - Full **iortcw feature set**, including proper widescreen support
 - SDL3 backend
+- **macOS support** (Apple Silicon / arm64) — native `.app` bundle and DMG packaging
 - **Steam integration** via *Steamshim* (by Ryan C. Gordon)
 - Steam Achievements and Steam Stats support
 - Steam Workshop Integration
@@ -38,6 +41,49 @@ The project focuses on modernizing the engine, expanding gameplay systems, and i
 - Aim assist for gamepads
 - `.pk3` gating via CVARs  
 - Numerous bug fixes and general QoL improvements  
+
+---
+
+## 🔨 Building from Source
+
+### Linux
+
+See [`HOWTO-Build (linux).md`](HOWTO-Build%20(linux).md) for distro-specific prerequisites.
+
+```bash
+git clone https://github.com/teamlynxoid/realrtcw_mac
+cd realrtcw_mac
+make
+```
+
+Requires **FFmpeg 8+**. RealRTCW 5.3 is the last version that does not require FFmpeg.
+
+### macOS
+
+**Prerequisites (Homebrew):**
+```bash
+brew install sdl3 ffmpeg pkg-config
+```
+
+```bash
+git clone https://github.com/teamlynxoid/realrtcw_mac
+cd realrtcw_mac
+
+# Build (Apple Silicon)
+./make-macosx.sh arm64
+
+# Build .app bundle
+./make-macosx-app.sh release arm64
+
+# Package as DMG
+./make-macosx-dmg.sh release
+```
+
+### Windows (cross-compile from Linux)
+
+```bash
+./cross-make-mingw64.sh
+```
 
 ---
 

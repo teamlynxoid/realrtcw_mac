@@ -41,8 +41,8 @@ sudo apt install git build-essential libsdl2-dev ffmpeg libavcodec-dev libavform
 ## Pull Source
 
 ```bash
-git clone https://github.com/wolfetplayer/RealRTCW
-cd RealRTCW
+git clone https://github.com/teamlynxoid/realrtcw_mac
+cd realrtcw_mac
 ```
 
 The current main branch may be ahead of the released mod files. For compatibility, switch to the corresponding release tag (latest at the time of writing: 5.4). You can return using `git switch -`.

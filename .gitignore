@@ -40,7 +40,23 @@ profile
 *.sdf
 *.opensdf
 *.suo
+*.obj
+*.iobj
+*.ipdb
+*.recipe
+x64/
+x86/
+.vs/
 
 # vscode
 .vscode/
 /.vs
+
+# Claude Code
+CLAUDE.md
+
+# Build artifacts
+*.dmg
+
+# AI planning docs
+docs/superpowers/

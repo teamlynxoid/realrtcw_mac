@@ -622,25 +622,25 @@ ifeq ($(PLATFORM),darwin)
   RENDERER_LIBS += -framework OpenGL
 
   ifeq ($(USE_LOCAL_HEADERS),1)
-    # libSDL2-2.0.0.dylib for PPC is SDL 2.0.1 + changes to compile
-    ifneq ($(findstring $(ARCH),ppc ppc64),)
-      BASE_CFLAGS += -I$(SDLHDIR)/include-2.0.1
-    else
-      BASE_CFLAGS += -I$(SDLHDIR)/include
-    endif
-
-    # We copy sdlmain before ranlib'ing it so that subversion doesn't think
-    #  the file has been modified by each build.
-    LIBSDLMAIN=$(B)/libSDL2main.a
-    LIBSDLMAINSRC=$(LIBSDIR)/macosx/libSDL2main.a
-    CLIENT_LIBS += $(LIBSDIR)/macosx/libSDL2-2.0.0.dylib
-    RENDERER_LIBS += $(LIBSDIR)/macosx/libSDL2-2.0.0.dylib
-    CLIENT_EXTRA_FILES += $(LIBSDIR)/macosx/libSDL2-2.0.0.dylib
-  else
-    BASE_CFLAGS += -I/Library/Frameworks/SDL2.framework/Headers
-    CLIENT_LIBS += -framework SDL2
-    RENDERER_LIBS += -framework SDL2
+    BASE_CFLAGS += -I$(SDLHDIR)/include
   endif
+
+  SDL3_CFLAGS := $(shell $(PKG_CONFIG) --silence-errors --cflags sdl3)
+  SDL3_LIBS   := $(shell $(PKG_CONFIG) --silence-errors --libs   sdl3)
+  ifneq ($(SDL3_CFLAGS),)
+    BASE_CFLAGS   += $(SDL3_CFLAGS)
+    CLIENT_LIBS   += $(SDL3_LIBS)
+    RENDERER_LIBS += $(SDL3_LIBS)
+  else
+    BASE_CFLAGS   += -I/Library/Frameworks/SDL3.framework/Headers
+    CLIENT_LIBS   += -framework SDL3
+    RENDERER_LIBS += -framework SDL3
+  endif
+
+  FFMPEG_CFLAGS := $(shell $(PKG_CONFIG) --silence-errors --cflags libavcodec libavformat libavutil libswscale libswresample)
+  FFMPEG_LIBS   := $(shell $(PKG_CONFIG) --silence-errors --libs   libavcodec libavformat libavutil libswscale libswresample)
+  BASE_CFLAGS += $(FFMPEG_CFLAGS)
+  LIBS        += $(FFMPEG_LIBS)
 
   OPTIMIZE = $(OPTIMIZEVM) -ffast-math
 

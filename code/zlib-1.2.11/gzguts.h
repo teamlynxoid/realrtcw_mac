@@ -18,6 +18,9 @@
 #  define ZLIB_INTERNAL
 #endif
 
+#ifdef __APPLE__
+#  undef fdopen  /* zutil.h wrongly redefines fdopen as NULL on TARGET_OS_MAC */
+#endif
 #include <stdio.h>
 #include "zlib.h"
 #ifdef STDC
