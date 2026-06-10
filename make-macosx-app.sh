@@ -443,36 +443,75 @@ symlinkArch "${CGAME}"	"${CGAME}."	""	"${BUNDLEBINDIR}/${BASEDIR}"
 symlinkArch "${GAME}"	"${GAME}."	""	"${BUNDLEBINDIR}/${BASEDIR}"
 symlinkArch "${UI}"		"${UI}."		""	"${BUNDLEBINDIR}/${BASEDIR}"
 
-# Fix embedded dylib paths so bundle is self-contained
+# Fix embedded dylib paths so bundle is self-contained.
+# $1 = binary or dylib that links against $2
+# $2 = dylib already copied into BUNDLEBINDIR
 fix_dylib_ref() {
 	local BINARY="$1"
 	local DYLIB_DEST="$2"
 	local BASENAME LIB_STEM OLD_REF
 	BASENAME=$(basename "${DYLIB_DEST}")
-	LIB_STEM="${BASENAME%.dylib}"  # e.g. libSDL3 from libSDL3.dylib
-	# Update the dylib's own identity to the bundle-relative path
+	LIB_STEM="${BASENAME%.dylib}"
 	install_name_tool -id "@executable_path/${BASENAME}" "${DYLIB_DEST}" 2>/dev/null || true
-	# Find any non-@executable_path reference to this library in the binary
-	# (handles versioned names like libSDL3.0.dylib matching libSDL3.dylib)
 	OLD_REF=$(otool -L "${BINARY}" 2>/dev/null | awk '{print $1}' | grep "${LIB_STEM}" | grep -v "@executable_path" | head -1)
 	if [ -n "${OLD_REF}" ]; then
 		install_name_tool -change "${OLD_REF}" "@executable_path/${BASENAME}" "${BINARY}" 2>/dev/null || true
 	fi
 }
 
+# Rewrite all non-system, non-bundled refs in BINARY to @executable_path/basename.
+# Copies each referenced dylib into BUNDLEBINDIR if not already there.
+# Iterates until no external refs remain (handles transitive deps).
+bundle_transitive_deps() {
+	local CHANGED=1
+	while [ "${CHANGED}" = "1" ]; do
+		CHANGED=0
+		for SCAN in "${BUNDLEBINDIR}"/*.dylib "${BUNDLEBINDIR}/${EXECUTABLE_NAME}"; do
+			[ -f "${SCAN}" ] || continue
+			while IFS= read -r EXTREF; do
+				[ -f "${EXTREF}" ] || continue
+				DESTNAME=$(basename "${EXTREF}")
+				DEST="${BUNDLEBINDIR}/${DESTNAME}"
+				if [ ! -f "${DEST}" ]; then
+					cp -f "${EXTREF}" "${DEST}"
+					chmod +w "${DEST}"
+					echo "  + bundled transitive dep: ${DESTNAME}"
+					CHANGED=1
+				fi
+				# Rewrite this ref in every dylib and the main binary
+				for TARGET in "${BUNDLEBINDIR}"/*.dylib "${BUNDLEBINDIR}/${EXECUTABLE_NAME}"; do
+					[ -f "${TARGET}" ] || continue
+					fix_dylib_ref "${TARGET}" "${DEST}"
+				done
+			done < <(otool -L "${SCAN}" 2>/dev/null | tail -n +2 | awk '{print $1}' \
+			          | grep "^/opt/homebrew\|^/usr/local" \
+			          | grep -v "^$(otool -D "${SCAN}" 2>/dev/null | tail -1)$")
+		done
+	done
+}
+
 BUNDLE_BIN="${BUNDLEBINDIR}/${EXECUTABLE_NAME}"
 BUNDLE_RENDERER="${BUNDLEBINDIR}/${RENDERER_OPENGL1_NAME}"
 
-for DYLIB in "${BUNDLEBINDIR}"/libSDL3*.dylib \
-             "${BUNDLEBINDIR}"/libavcodec*.dylib \
-             "${BUNDLEBINDIR}"/libavformat*.dylib \
-             "${BUNDLEBINDIR}"/libavutil*.dylib \
-             "${BUNDLEBINDIR}"/libswscale*.dylib \
-             "${BUNDLEBINDIR}"/libswresample*.dylib; do
+# Fix renderer dylib identity (Makefile sets it to the build output path)
+install_name_tool -id "@executable_path/${RENDERER_OPENGL1_NAME}" "${BUNDLE_RENDERER}" 2>/dev/null || true
+
+# Fix refs to all already-bundled dylibs in every binary — covers:
+#   - main binary & renderer → SDL3, FFmpeg
+#   - FFmpeg dylibs → each other (inter-FFmpeg versioned refs)
+# Must run before bundle_transitive_deps so inter-FFmpeg versioned names
+# (e.g. libavcodec.62.dylib) are rewritten to the bundled unversioned name
+# before the transitive scanner sees them.
+for DYLIB in "${BUNDLEBINDIR}"/*.dylib; do
 	[ -f "${DYLIB}" ] || continue
-	fix_dylib_ref "${BUNDLE_BIN}"      "${DYLIB}"
-	fix_dylib_ref "${BUNDLE_RENDERER}" "${DYLIB}"
+	for TARGET in "${BUNDLEBINDIR}"/*.dylib "${BUNDLE_BIN}" "${BUNDLE_RENDERER}"; do
+		[ -f "${TARGET}" ] && fix_dylib_ref "${TARGET}" "${DYLIB}"
+	done
 done
+
+# Bundle and rewrite all remaining transitive Homebrew deps (codec libs, openssl, etc.)
+echo "Bundling transitive dependencies..."
+bundle_transitive_deps
 
 # Re-sign all dylibs and binaries with ad-hoc signature after install_name_tool modifications
 echo "Re-signing bundle..."
@@ -482,6 +521,18 @@ for DYLIB in "${BUNDLEBINDIR}"/*.dylib; do
 done
 codesign --force --sign - "${BUNDLE_BIN}"      2>/dev/null || true
 codesign --force --sign - "${BUNDLE_RENDERER}" 2>/dev/null || true
+
+# Generate .dSYM bundles for LLDB source-level debugging
+if command -v dsymutil >/dev/null 2>&1; then
+	echo "Generating .dSYM bundles..."
+	dsymutil "${BUNDLE_BIN}"      -o "${BUNDLE_BIN}.dSYM"      2>/dev/null || true
+	dsymutil "${BUNDLE_RENDERER}" -o "${BUNDLE_RENDERER}.dSYM" 2>/dev/null || true
+	for GAMELIB in "${BUNDLEBINDIR}/${BASEDIR}"/*.dylib; do
+		[ -f "${GAMELIB}" ] || continue
+		GAMELIB_BASE=$(basename "${GAMELIB}")
+		dsymutil "${GAMELIB}" -o "${BUNDLEBINDIR}/${BASEDIR}/${GAMELIB_BASE}.dSYM" 2>/dev/null || true
+	done
+fi
 
 # Bundle game content pk3 files if GAME_DATA_PATH is set
 if [ -n "${GAME_DATA_PATH}" ]; then

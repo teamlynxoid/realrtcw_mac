@@ -3,10 +3,11 @@
 
 # Let's make the user give us a target build system
 
-if [ $# -ne 1 ]; then
-	echo "Usage:   $0 target_architecture"
-	echo "Example: $0 x86"
-	echo "other valid options are x86_64, ppc or arm64"
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+	echo "Usage:   $0 target_architecture [debug|release]"
+	echo "Example: $0 arm64"
+	echo "         $0 arm64 debug"
+	echo "other valid architectures are x86, x86_64, ppc"
 	echo
 	echo "If you don't know or care about architectures please consider using make-macosx-ub.sh instead of this script."
 	exit 1
@@ -26,8 +27,18 @@ else
 	exit 1
 fi
 
-CC=gcc-4.0
-DESTDIR=build/release-darwin-${BUILDARCH}
+BUILDTYPE="release"
+if [ "$2" == "debug" ]; then
+	BUILDTYPE="debug"
+elif [ "$2" == "release" ] || [ "$2" == "" ]; then
+	BUILDTYPE="release"
+elif [ "$2" != "" ]; then
+	echo "Invalid build type: $2"
+	echo "Valid build types are debug or release"
+	exit 1
+fi
+
+DESTDIR=build/${BUILDTYPE}-darwin-${BUILDARCH}
 
 cd `dirname $0`
 if [ ! -f Makefile ]; then
@@ -83,7 +94,7 @@ NCPU=`sysctl -n hw.ncpu`
 #if [ -d build/release-darwin-${BUILDARCH} ]; then
 #	rm -r build/release-darwin-${BUILDARCH}
 #fi
-(ARCH=${BUILDARCH} CFLAGS=$ARCH_CFLAGS MACOSX_VERSION_MIN=$ARCH_MACOSX_VERSION_MIN make -j$NCPU) || exit 1;
+(ARCH=${BUILDARCH} CFLAGS=$ARCH_CFLAGS MACOSX_VERSION_MIN=$ARCH_MACOSX_VERSION_MIN make -j$NCPU ${BUILDTYPE}) || exit 1;
 
 # use the following shell script to build an application bundle
 export MACOSX_DEPLOYMENT_TARGET="${ARCH_MACOSX_VERSION_MIN}"
@@ -91,4 +102,4 @@ export MACOSX_DEPLOYMENT_TARGET_PPC=
 export MACOSX_DEPLOYMENT_TARGET_X86=
 export MACOSX_DEPLOYMENT_TARGET_X86_64=
 export MACOSX_DEPLOYMENT_TARGET_ARM64=
-"./make-macosx-app.sh" release ${BUILDARCH}
+"./make-macosx-app.sh" ${BUILDTYPE} ${BUILDARCH}

@@ -45,13 +45,27 @@ DMG_TEMP="${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}-tmp.dmg"
 VOLUME_NAME="${PRODUCT_NAME}"
 MOUNT_POINT="/Volumes/${VOLUME_NAME}"
 
-# Cleanup temp DMG on exit (success or failure)
+# Detach all hdiutil disk images whose path contains a given substring
+detach_images_matching() {
+    local pattern="$1"
+    hdiutil info 2>/dev/null | grep -E "^image-path" | grep "${pattern}" | while read -r _key _colon img; do
+        hdiutil detach "${img}" -force 2>/dev/null || true
+    done
+}
+
+ATTACH_DEV=""
+
 cleanup() {
-    if [ -f "${DMG_TEMP}" ]; then
-        rm -f "${DMG_TEMP}"
+    if [ -n "${ATTACH_DEV}" ]; then
+        hdiutil detach "${ATTACH_DEV}" -force 2>/dev/null || true
     fi
+    detach_images_matching "${BUILT_PRODUCTS_DIR}"
+    rm -f "${DMG_TEMP}"
 }
 trap cleanup EXIT
+
+# Eject any stale mounts from this build dir (final DMG, leftover temp DMGs)
+detach_images_matching "${BUILT_PRODUCTS_DIR}"
 
 # Calculate size: bundle size in MB + 20% headroom, minimum 128 MB
 BUNDLE_SIZE_KB=$(du -sk "${APP_BUNDLE}" | awk '{print $1}')
@@ -68,7 +82,13 @@ hdiutil create \
     -o "${DMG_TEMP}"
 
 echo "Mounting temp DMG..."
-hdiutil attach "${DMG_TEMP}" -mountpoint "${MOUNT_POINT}" -nobrowse -quiet
+ATTACH_DEV=$(hdiutil attach "${DMG_TEMP}" -mountpoint "${MOUNT_POINT}" -nobrowse -noverify 2>&1 \
+    | awk '/^\/dev\/disk[0-9]+[[:space:]]/ { print $1; exit }')
+if [ -z "${ATTACH_DEV}" ]; then
+    echo "**** ERROR: failed to attach temp DMG"
+    exit 1
+fi
+echo "  attached as ${ATTACH_DEV}"
 
 echo "Copying bundle..."
 cp -R "${APP_BUNDLE}" "${MOUNT_POINT}/"
@@ -77,7 +97,10 @@ echo "Creating /Applications symlink..."
 ln -s /Applications "${MOUNT_POINT}/Applications"
 
 echo "Unmounting..."
-hdiutil detach "${MOUNT_POINT}" -quiet
+sync
+hdiutil detach "${ATTACH_DEV}" -quiet || hdiutil detach "${ATTACH_DEV}" -force -quiet
+ATTACH_DEV=""
+sleep 1
 
 echo "Converting to compressed DMG..."
 rm -f "${DMG_FINAL}"
