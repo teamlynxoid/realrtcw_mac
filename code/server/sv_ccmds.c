@@ -549,7 +549,6 @@ void    SV_LoadGame_f( void ) {
 	if ( com_sv_running->integer && ( com_frameTime != sv.serverId ) ) {
 		// check mapname
 		if ( !Q_stricmp( mapname, sv_mapname->string ) ) {    // same
-
 			if ( Q_stricmp( filename, "save/current_realrtcw.svg" ) != 0 ) {
 				// copy it to the current savegame file
 				FS_WriteFile( "save/current_realrtcw.svg", buffer, size );
@@ -566,30 +565,27 @@ void    SV_LoadGame_f( void ) {
 			return;
 		}
 	}
-
 	Hunk_FreeTempMemory( buffer );
 
-    if ( Cvar_VariableValue( "g_gametype" ) == GT_SINGLE_PLAYER ) {
-	// otherwise, do a slow load
-	if ( Cvar_VariableIntegerValue( "sv_cheats" ) ) {
-		Cbuf_ExecuteText( EXEC_APPEND, va( "spdevmap %s", filename ) );
-	} else {    // no cheats
-		Cbuf_ExecuteText( EXEC_APPEND, va( "spmap %s", filename ) );
-	}
-	} else if ( Cvar_VariableValue( "g_gametype" ) == GT_GOTHIC ) {
-			// otherwise, do a slow load
-	if ( Cvar_VariableIntegerValue( "sv_cheats" ) ) {
-		Cbuf_ExecuteText( EXEC_APPEND, va( "gtdevmap %s", filename ) );
-	} else {    // no cheats
-		Cbuf_ExecuteText( EXEC_APPEND, va( "gtmap %s", filename ) );
-	}
-	} else if ( Cvar_VariableValue( "g_gametype" ) == GT_SURVIVAL ) {
-			// otherwise, do a slow load
-	if ( Cvar_VariableIntegerValue( "sv_cheats" ) ) {
-		Cbuf_ExecuteText( EXEC_APPEND, va( "svdevmap %s", filename ) );
-	} else {    // no cheats
-		Cbuf_ExecuteText( EXEC_APPEND, va( "svmap %s", filename ) );
-	}
+	if ( Cvar_VariableIntegerValue( "g_gametype" ) == GT_GOTHIC ) {
+		if ( Cvar_VariableIntegerValue( "sv_cheats" ) ) {
+			Cbuf_ExecuteText( EXEC_APPEND, va( "gtdevmap %s", filename ) );
+		} else {
+			Cbuf_ExecuteText( EXEC_APPEND, va( "gtmap %s", filename ) );
+		}
+	} else if ( Cvar_VariableIntegerValue( "g_gametype" ) == GT_SURVIVAL ) {
+		if ( Cvar_VariableIntegerValue( "sv_cheats" ) ) {
+			Cbuf_ExecuteText( EXEC_APPEND, va( "svdevmap %s", filename ) );
+		} else {
+			Cbuf_ExecuteText( EXEC_APPEND, va( "svmap %s", filename ) );
+		}
+	} else {
+		// default: single player (covers GT_SINGLE_PLAYER, GT_NONE, and any stale/invalid value)
+		if ( Cvar_VariableIntegerValue( "sv_cheats" ) ) {
+			Cbuf_ExecuteText( EXEC_APPEND, va( "spdevmap %s", filename ) );
+		} else {
+			Cbuf_ExecuteText( EXEC_APPEND, va( "spmap %s", filename ) );
+		}
 	}
 }
 
