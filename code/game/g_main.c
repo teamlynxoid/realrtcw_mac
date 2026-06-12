@@ -1236,8 +1236,9 @@ void G_UpdateCvars( void ) {
 						AICast_ScriptEvent( AICast_GetCastState( player->s.number ), "playerstart", "" );
 						saveGamePending = qfalse;   // set it back
 
-						// save the "autosave\\<mapname>" savegame (disabled for Survival)
-						if (g_gametype.integer != GT_SURVIVAL)
+						// save the "autosave\\<mapname>" savegame (disabled for Survival and load)
+						if (g_gametype.integer != GT_SURVIVAL &&
+							!trap_Cvar_VariableIntegerValue("savegame_loading"))
 						{
 							trap_Cvar_VariableStringBuffer("mapname", mapname, sizeof(mapname));
 							Q_strncpyz(filename, "autosave\\", sizeof(filename));
@@ -1249,7 +1250,9 @@ void G_UpdateCvars( void ) {
 						AICast_CastScriptThink();
 
 						// if we are not watching a cutscene, save the game
-						if (!g_entities[0].client->cameraPortal)
+						// skip saves during load: G_LoadGame hasn't restored state yet
+						if (!g_entities[0].client->cameraPortal &&
+							!trap_Cvar_VariableIntegerValue("savegame_loading"))
 						{
 							if (g_gametype.integer != GT_SURVIVAL)
 							{
